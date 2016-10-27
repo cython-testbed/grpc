@@ -79,6 +79,11 @@ BUILD_WITH_CYTHON = os.environ.get('GRPC_PYTHON_BUILD_WITH_CYTHON', False)
 ENABLE_CYTHON_TRACING = os.environ.get(
     'GRPC_PYTHON_ENABLE_CYTHON_TRACING', False)
 
+# Environment variable specifying whether or not there's interest in setting up
+# documentation building.
+ENABLE_DOCUMENTATION_BUILD = os.environ.get(
+    'GRPC_PYTHON_ENABLE_DOCUMENTATION_BUILD', False)
+
 # There are some situations (like on Windows) where CC, CFLAGS, and LDFLAGS are
 # entirely ignored/dropped/forgotten by distutils and its Cygwin/MinGW support.
 # We use these environment variables to thus get around that without locking
@@ -198,17 +203,20 @@ PACKAGE_DIRECTORIES = {
 INSTALL_REQUIRES = (
     'six>=1.5.2',
     'enum34>=1.0.4',
-    'futures>=2.2.0',
     # TODO(atash): eventually split the grpcio package into a metapackage
     # depending on protobuf and the runtime component (independent of protobuf)
     'protobuf>=3.0.0',
 )
 
+if not PY3:
+  INSTALL_REQUIRES += ('futures>=2.2.0',)
+
 SETUP_REQUIRES = INSTALL_REQUIRES + (
     'sphinx>=1.3',
     'sphinx_rtd_theme>=0.1.8',
     'six>=1.10',
-)
+  ) if ENABLE_DOCUMENTATION_BUILD else ()
+
 if BUILD_WITH_CYTHON:
   sys.stderr.write(
     "You requested a Cython build via GRPC_PYTHON_BUILD_WITH_CYTHON, "
