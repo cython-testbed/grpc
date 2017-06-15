@@ -1,38 +1,24 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
 #include <string.h>
 
+#include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/security/context/security_context.h"
 #include "src/core/lib/support/string.h"
 #include "src/core/lib/surface/api_trace.h"
@@ -47,6 +33,7 @@
 
 grpc_call_error grpc_call_set_credentials(grpc_call *call,
                                           grpc_call_credentials *creds) {
+  grpc_exec_ctx exec_ctx = GRPC_EXEC_CTX_INIT;
   grpc_client_security_context *ctx = NULL;
   GRPC_API_TRACE("grpc_call_set_credentials(call=%p, creds=%p)", 2,
                  (call, creds));
@@ -62,9 +49,10 @@ grpc_call_error grpc_call_set_credentials(grpc_call *call,
     grpc_call_context_set(call, GRPC_CONTEXT_SECURITY, ctx,
                           grpc_client_security_context_destroy);
   } else {
-    grpc_call_credentials_unref(ctx->creds);
+    grpc_call_credentials_unref(&exec_ctx, ctx->creds);
     ctx->creds = grpc_call_credentials_ref(creds);
   }
+  grpc_exec_ctx_finish(&exec_ctx);
   return GRPC_CALL_OK;
 }
 
@@ -89,29 +77,25 @@ void grpc_auth_context_release(grpc_auth_context *context) {
 /* --- grpc_client_security_context --- */
 
 grpc_client_security_context *grpc_client_security_context_create(void) {
-  grpc_client_security_context *ctx =
-      gpr_malloc(sizeof(grpc_client_security_context));
-  memset(ctx, 0, sizeof(grpc_client_security_context));
-  return ctx;
+  return gpr_zalloc(sizeof(grpc_client_security_context));
 }
 
 void grpc_client_security_context_destroy(void *ctx) {
+  grpc_exec_ctx exec_ctx = GRPC_EXEC_CTX_INIT;
   grpc_client_security_context *c = (grpc_client_security_context *)ctx;
-  grpc_call_credentials_unref(c->creds);
+  grpc_call_credentials_unref(&exec_ctx, c->creds);
   GRPC_AUTH_CONTEXT_UNREF(c->auth_context, "client_security_context");
   if (c->extension.instance != NULL && c->extension.destroy != NULL) {
     c->extension.destroy(c->extension.instance);
   }
   gpr_free(ctx);
+  grpc_exec_ctx_finish(&exec_ctx);
 }
 
 /* --- grpc_server_security_context --- */
 
 grpc_server_security_context *grpc_server_security_context_create(void) {
-  grpc_server_security_context *ctx =
-      gpr_malloc(sizeof(grpc_server_security_context));
-  memset(ctx, 0, sizeof(grpc_server_security_context));
-  return ctx;
+  return gpr_zalloc(sizeof(grpc_server_security_context));
 }
 
 void grpc_server_security_context_destroy(void *ctx) {
@@ -128,8 +112,7 @@ void grpc_server_security_context_destroy(void *ctx) {
 static grpc_auth_property_iterator empty_iterator = {NULL, 0, NULL};
 
 grpc_auth_context *grpc_auth_context_create(grpc_auth_context *chained) {
-  grpc_auth_context *ctx = gpr_malloc(sizeof(grpc_auth_context));
-  memset(ctx, 0, sizeof(grpc_auth_context));
+  grpc_auth_context *ctx = gpr_zalloc(sizeof(grpc_auth_context));
   gpr_ref_init(&ctx->refcount, 1);
   if (chained != NULL) {
     ctx->chained = GRPC_AUTH_CONTEXT_REF(chained, "chained");
@@ -307,7 +290,7 @@ void grpc_auth_property_reset(grpc_auth_property *property) {
   memset(property, 0, sizeof(grpc_auth_property));
 }
 
-static void auth_context_pointer_arg_destroy(void *p) {
+static void auth_context_pointer_arg_destroy(grpc_exec_ctx *exec_ctx, void *p) {
   GRPC_AUTH_CONTEXT_UNREF(p, "auth_context_pointer_arg");
 }
 
@@ -322,13 +305,8 @@ static const grpc_arg_pointer_vtable auth_context_pointer_vtable = {
     auth_context_pointer_cmp};
 
 grpc_arg grpc_auth_context_to_arg(grpc_auth_context *p) {
-  grpc_arg arg;
-  memset(&arg, 0, sizeof(grpc_arg));
-  arg.type = GRPC_ARG_POINTER;
-  arg.key = GRPC_AUTH_CONTEXT_ARG;
-  arg.value.pointer.p = p;
-  arg.value.pointer.vtable = &auth_context_pointer_vtable;
-  return arg;
+  return grpc_channel_arg_pointer_create(GRPC_AUTH_CONTEXT_ARG, p,
+                                         &auth_context_pointer_vtable);
 }
 
 grpc_auth_context *grpc_auth_context_from_arg(const grpc_arg *arg) {

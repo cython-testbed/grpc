@@ -1,32 +1,17 @@
 #!/usr/bin/env python2.7
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 
 """Generates the appropriate build.json data for all the end2end tests."""
@@ -39,9 +24,9 @@ import hashlib
 
 FixtureOptions = collections.namedtuple(
     'FixtureOptions',
-    'fullstack includes_proxy dns_resolver secure platforms ci_mac tracing exclude_configs exclude_iomgrs')
+    'fullstack includes_proxy dns_resolver secure platforms ci_mac tracing exclude_configs exclude_iomgrs large_writes enables_compression')
 default_unsecure_fixture_options = FixtureOptions(
-    True, False, True, False, ['windows', 'linux', 'mac', 'posix'], True, False, [], [])
+    True, False, True, False, ['windows', 'linux', 'mac', 'posix'], True, False, [], [], True, False)
 socketpair_unsecure_fixture_options = default_unsecure_fixture_options._replace(fullstack=False, dns_resolver=False)
 default_secure_fixture_options = default_unsecure_fixture_options._replace(secure=True)
 uds_fixture_options = default_unsecure_fixture_options._replace(dns_resolver=False, platforms=['linux', 'mac', 'posix'], exclude_iomgrs=['uv'])
@@ -51,17 +36,16 @@ fd_unsecure_fixture_options = default_unsecure_fixture_options._replace(
 
 # maps fixture name to whether it requires the security library
 END2END_FIXTURES = {
-    'h2_compress': default_unsecure_fixture_options,
-
+    'h2_compress': default_unsecure_fixture_options._replace(enables_compression=True),
     'h2_census': default_unsecure_fixture_options,
     'h2_load_reporting': default_unsecure_fixture_options,
     'h2_fakesec': default_secure_fixture_options._replace(ci_mac=False),
-    'h2_fake_resolver': default_unsecure_fixture_options,
     'h2_fd': fd_unsecure_fixture_options,
     'h2_full': default_unsecure_fixture_options,
     'h2_full+pipe': default_unsecure_fixture_options._replace(
         platforms=['linux'], exclude_iomgrs=['uv']),
     'h2_full+trace': default_unsecure_fixture_options._replace(tracing=True),
+    'h2_full+workarounds': default_unsecure_fixture_options,
     'h2_http_proxy': default_unsecure_fixture_options._replace(
         ci_mac=False, exclude_iomgrs=['uv']),
     'h2_oauth2': default_secure_fixture_options._replace(
@@ -69,11 +53,12 @@ END2END_FIXTURES = {
     'h2_proxy': default_unsecure_fixture_options._replace(
         includes_proxy=True, ci_mac=False, exclude_iomgrs=['uv']),
     'h2_sockpair_1byte': socketpair_unsecure_fixture_options._replace(
-        ci_mac=False, exclude_configs=['msan'], exclude_iomgrs=['uv']),
+        ci_mac=False, exclude_configs=['msan'], large_writes=False,
+        exclude_iomgrs=['uv']),
     'h2_sockpair': socketpair_unsecure_fixture_options._replace(
         ci_mac=False, exclude_iomgrs=['uv']),
     'h2_sockpair+trace': socketpair_unsecure_fixture_options._replace(
-        ci_mac=False, tracing=True, exclude_iomgrs=['uv']),
+        ci_mac=False, tracing=True, large_writes=False, exclude_iomgrs=['uv']),
     'h2_ssl': default_secure_fixture_options,
     'h2_ssl_cert': default_secure_fixture_options,
     'h2_ssl_proxy': default_secure_fixture_options._replace(
@@ -83,19 +68,24 @@ END2END_FIXTURES = {
 
 TestOptions = collections.namedtuple(
     'TestOptions',
-    'needs_fullstack needs_dns proxyable secure traceable cpu_cost exclude_iomgrs')
-default_test_options = TestOptions(False, False, True, False, True, 1.0, [])
+    'needs_fullstack needs_dns proxyable secure traceable cpu_cost exclude_iomgrs large_writes flaky allow_compression')
+default_test_options = TestOptions(False, False, True, False, True, 1.0, [], False, False, True)
 connectivity_test_options = default_test_options._replace(needs_fullstack=True)
 
 LOWCPU = 0.1
 
 # maps test names to options
 END2END_TESTS = {
+    'authority_not_supported': default_test_options,
     'bad_hostname': default_test_options,
-    'binary_metadata': default_test_options,
+    'bad_ping': connectivity_test_options._replace(proxyable=False),
+    'binary_metadata': default_test_options._replace(cpu_cost=LOWCPU),
+    'resource_quota_server': default_test_options._replace(large_writes=True,
+                                                           proxyable=False,
+                                                           allow_compression=False),
     'call_creds': default_test_options._replace(secure=True),
     'cancel_after_accept': default_test_options._replace(cpu_cost=LOWCPU),
-    'cancel_after_client_done': default_test_options,
+    'cancel_after_client_done': default_test_options._replace(cpu_cost=LOWCPU),
     'cancel_after_invoke': default_test_options._replace(cpu_cost=LOWCPU),
     'cancel_before_invoke': default_test_options._replace(cpu_cost=LOWCPU),
     'cancel_in_a_vacuum': default_test_options._replace(cpu_cost=LOWCPU),
@@ -105,40 +95,51 @@ END2END_TESTS = {
         proxyable=False, cpu_cost=LOWCPU, exclude_iomgrs=['uv']),
     'default_host': default_test_options._replace(needs_fullstack=True,
                                                   needs_dns=True),
-    'disappearing_server': connectivity_test_options,
-    'empty_batch': default_test_options,
-    'filter_causes_close': default_test_options,
+    'disappearing_server': connectivity_test_options._replace(flaky=True),
+    'empty_batch': default_test_options._replace(cpu_cost=LOWCPU),
+    'filter_causes_close': default_test_options._replace(cpu_cost=LOWCPU),
     'filter_call_init_fails': default_test_options,
+    'filter_latency': default_test_options._replace(cpu_cost=LOWCPU),
     'graceful_server_shutdown': default_test_options._replace(cpu_cost=LOWCPU),
     'hpack_size': default_test_options._replace(proxyable=False,
-                                                traceable=False),
-    'high_initial_seqno': default_test_options,
+                                                traceable=False,
+                                                cpu_cost=LOWCPU),
+    'high_initial_seqno': default_test_options._replace(cpu_cost=LOWCPU),
     'idempotent_request': default_test_options,
     'invoke_large_request': default_test_options,
+    'keepalive_timeout': default_test_options._replace(proxyable=False,
+                                                       cpu_cost=LOWCPU),
     'large_metadata': default_test_options,
-    'max_concurrent_streams': default_test_options._replace(proxyable=False),
-    'max_message_length': default_test_options,
+    'max_concurrent_streams': default_test_options._replace(
+        proxyable=False, cpu_cost=LOWCPU),
+    'max_connection_age': default_test_options._replace(cpu_cost=LOWCPU),
+    'max_connection_idle': connectivity_test_options._replace(
+        proxyable=False, exclude_iomgrs=['uv'], cpu_cost=LOWCPU),
+    'max_message_length': default_test_options._replace(cpu_cost=LOWCPU),
     'negative_deadline': default_test_options,
-    'network_status_change': default_test_options,
+    'network_status_change': default_test_options._replace(cpu_cost=LOWCPU),
     'no_logging': default_test_options._replace(traceable=False),
     'no_op': default_test_options,
     'payload': default_test_options,
     'load_reporting_hook': default_test_options,
-    'ping_pong_streaming': default_test_options,
-    'ping': connectivity_test_options._replace(proxyable=False),
+    'ping_pong_streaming': default_test_options._replace(cpu_cost=LOWCPU),
+    'ping': connectivity_test_options._replace(proxyable=False, cpu_cost=LOWCPU),
     'registered_call': default_test_options,
     'request_with_flags': default_test_options._replace(
         proxyable=False, cpu_cost=LOWCPU),
-    'request_with_payload': default_test_options,
-    'server_finishes_request': default_test_options,
-    'shutdown_finishes_calls': default_test_options,
-    'shutdown_finishes_tags': default_test_options,
-    'simple_cacheable_request': default_test_options,
+    'request_with_payload': default_test_options._replace(cpu_cost=LOWCPU),
+    'server_finishes_request': default_test_options._replace(cpu_cost=LOWCPU),
+    'shutdown_finishes_calls': default_test_options._replace(cpu_cost=LOWCPU),
+    'shutdown_finishes_tags': default_test_options._replace(cpu_cost=LOWCPU),
+    'simple_cacheable_request': default_test_options._replace(cpu_cost=LOWCPU),
     'simple_delayed_request': connectivity_test_options,
     'simple_metadata': default_test_options,
     'simple_request': default_test_options,
-    'streaming_error_response': default_test_options,
+    'streaming_error_response': default_test_options._replace(cpu_cost=LOWCPU),
     'trailing_metadata': default_test_options,
+    'workaround_cronet_compression': default_test_options,
+    'write_buffering': default_test_options._replace(cpu_cost=LOWCPU),
+    'write_buffering_at_end': default_test_options._replace(cpu_cost=LOWCPU),
 }
 
 
@@ -154,6 +155,12 @@ def compatible(f, t):
       return False
   if not END2END_TESTS[t].traceable:
     if END2END_FIXTURES[f].tracing:
+      return False
+  if END2END_TESTS[t].large_writes:
+    if not END2END_FIXTURES[f].large_writes:
+      return False
+  if not END2END_TESTS[t].allow_compression:
+    if END2END_FIXTURES[f].enables_compression:
       return False
   return True
 
@@ -185,7 +192,8 @@ def main():
               'build': 'private',
               'language': 'c',
               'secure': True,
-              'src': ['test/core/end2end/end2end_tests.c'] + [
+              'src': ['test/core/end2end/end2end_tests.c',
+                      'test/core/end2end/end2end_test_utils.c'] + [
                   'test/core/end2end/tests/%s.c' % t
                   for t in sorted(END2END_TESTS.keys())],
               'headers': ['test/core/end2end/tests/cancel_test_helpers.h',
@@ -199,7 +207,8 @@ def main():
               'build': 'private',
               'language': 'c',
               'secure': False,
-              'src': ['test/core/end2end/end2end_nosec_tests.c'] + [
+              'src': ['test/core/end2end/end2end_nosec_tests.c',
+                      'test/core/end2end/end2end_test_utils.c'] + [
                   'test/core/end2end/tests/%s.c' % t
                   for t in sorted(END2END_TESTS.keys())
                   if not END2END_TESTS[t].secure],
@@ -257,7 +266,7 @@ def main():
               'ci_platforms': (END2END_FIXTURES[f].platforms
                                if END2END_FIXTURES[f].ci_mac else without(
                                    END2END_FIXTURES[f].platforms, 'mac')),
-              'flaky': False,
+              'flaky': END2END_TESTS[t].flaky,
               'language': 'c',
               'cpu_cost': END2END_TESTS[t].cpu_cost,
           }
@@ -274,7 +283,7 @@ def main():
               'ci_platforms': (END2END_FIXTURES[f].platforms
                                if END2END_FIXTURES[f].ci_mac else without(
                                    END2END_FIXTURES[f].platforms, 'mac')),
-              'flaky': False,
+              'flaky': END2END_TESTS[t].flaky,
               'language': 'c',
               'cpu_cost': END2END_TESTS[t].cpu_cost,
           }

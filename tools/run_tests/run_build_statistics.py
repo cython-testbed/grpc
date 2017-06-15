@@ -1,34 +1,21 @@
-#!/usr/bin/env python2.7
-# Copyright 2016, Google Inc.
-# All rights reserved.
+#!/usr/bin/env python
+# Copyright 2016 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Tool to get build statistics from Jenkins and upload to BigQuery."""
+
+from __future__ import print_function
 
 import argparse
 import jenkinsapi
@@ -47,13 +34,32 @@ sys.path.append(gcp_utils_dir)
 import big_query_utils
 
 
-_HAS_MATRIX=True
 _PROJECT_ID = 'grpc-testing'
 _HAS_MATRIX = True
-_BUILDS = {'gRPC_master': _HAS_MATRIX, 
-           'gRPC_interop_master': not _HAS_MATRIX, 
-           'gRPC_pull_requests': _HAS_MATRIX, 
+_BUILDS = {'gRPC_interop_master': not _HAS_MATRIX,
+           'gRPC_master_linux': not _HAS_MATRIX,
+           'gRPC_master_macos': not _HAS_MATRIX,
+           'gRPC_master_windows': not _HAS_MATRIX,
+           'gRPC_performance_master': not _HAS_MATRIX,
+           'gRPC_portability_master_linux': not _HAS_MATRIX,
+           'gRPC_portability_master_windows': not _HAS_MATRIX,
+           'gRPC_master_asanitizer_c': not _HAS_MATRIX,
+           'gRPC_master_asanitizer_cpp': not _HAS_MATRIX,
+           'gRPC_master_msan_c': not _HAS_MATRIX,
+           'gRPC_master_tsanitizer_c': not _HAS_MATRIX,
+           'gRPC_master_tsan_cpp': not _HAS_MATRIX,
            'gRPC_interop_pull_requests': not _HAS_MATRIX,
+           'gRPC_performance_pull_requests': not _HAS_MATRIX,
+           'gRPC_portability_pull_requests_linux': not _HAS_MATRIX,
+           'gRPC_portability_pr_win': not _HAS_MATRIX,
+           'gRPC_pull_requests_linux': not _HAS_MATRIX,
+           'gRPC_pull_requests_macos': not _HAS_MATRIX,
+           'gRPC_pr_win': not _HAS_MATRIX,
+           'gRPC_pull_requests_asan_c': not _HAS_MATRIX,
+           'gRPC_pull_requests_asan_cpp': not _HAS_MATRIX,
+           'gRPC_pull_requests_msan_c': not _HAS_MATRIX,
+           'gRPC_pull_requests_tsan_c': not _HAS_MATRIX,
+           'gRPC_pull_requests_tsan_cpp': not _HAS_MATRIX,
 }
 _URL_BASE = 'https://grpc-testing.appspot.com/job'
 
@@ -83,6 +89,7 @@ _KNOWN_ERRORS = [
     ('tests.bins/asan/h2_proxy_test streaming_error_response '
      'GRPC_POLL_STRATEGY=legacy'),
 ]
+_NO_REPORT_FILES_FOUND_ERROR = 'No test report files were found. Configuration error?'
 _UNKNOWN_ERROR = 'Unknown error'
 _DATASET_ID = 'build_statistics'
 
@@ -99,6 +106,10 @@ def _scrape_for_known_errors(html):
                          'count': this_error_count})
       print('====> %d failures due to %s' % (this_error_count, known_error))
   return error_list, known_error_count
+
+
+def _no_report_files_found(html):
+  return _NO_REPORT_FILES_FOUND_ERROR in html
 
 
 def _get_last_processed_buildnumber(build_name):
@@ -141,6 +152,7 @@ def _process_build(json_url, console_url):
     failure_count = test_result['failCount']
     build_result['pass_count'] = test_result['passCount']
     build_result['failure_count'] = failure_count
+    build_result['no_report_files_found'] = _no_report_files_found(html)
     if failure_count > 0:
       error_list, known_error_count = _scrape_for_known_errors(html)
       unknown_error_count = failure_count - known_error_count
@@ -218,6 +230,6 @@ for build_name in _BUILDS.keys() if 'all' in args.builds else args.builds:
     rows = [big_query_utils.make_row(build_number, build_result)]
     if not big_query_utils.insert_rows(bq, _PROJECT_ID, _DATASET_ID, build_name, 
                                        rows):
-      print '====> Error uploading result to bigquery.'
+      print('====> Error uploading result to bigquery.')
       sys.exit(1)
 

@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -122,15 +107,7 @@ class ServerInterface : public CallHook {
   /// caller is required to keep all completion queues live until the server is
   /// destroyed.
   /// \param num_cqs How many completion queues does \a cqs hold.
-  ///
-  /// \return true on a successful shutdown.
-  virtual bool Start(ServerCompletionQueue** cqs, size_t num_cqs) = 0;
-
-  /// Process one or more incoming calls.
-  virtual void RunRpc() = 0;
-
-  /// Schedule \a RunRpc to run in the threadpool.
-  virtual void ScheduleCallback() = 0;
+  virtual void Start(ServerCompletionQueue** cqs, size_t num_cqs) = 0;
 
   virtual void ShutdownInternal(gpr_timespec deadline) = 0;
 
@@ -146,9 +123,9 @@ class ServerInterface : public CallHook {
                      ServerAsyncStreamingInterface* stream,
                      CompletionQueue* call_cq, void* tag,
                      bool delete_on_finalize);
-    virtual ~BaseAsyncRequest() {}
+    virtual ~BaseAsyncRequest();
 
-    bool FinalizeResult(void** tag, bool* status) GRPC_OVERRIDE;
+    bool FinalizeResult(void** tag, bool* status) override;
 
    protected:
     ServerInterface* const server_;
@@ -158,7 +135,6 @@ class ServerInterface : public CallHook {
     void* const tag_;
     const bool delete_on_finalize_;
     grpc_call* call_;
-    grpc_metadata_array initial_metadata_array_;
   };
 
   class RegisteredAsyncRequest : public BaseAsyncRequest {
@@ -174,7 +150,7 @@ class ServerInterface : public CallHook {
                       ServerCompletionQueue* notification_cq);
   };
 
-  class NoPayloadAsyncRequest GRPC_FINAL : public RegisteredAsyncRequest {
+  class NoPayloadAsyncRequest final : public RegisteredAsyncRequest {
    public:
     NoPayloadAsyncRequest(void* registered_method, ServerInterface* server,
                           ServerContext* context,
@@ -189,7 +165,7 @@ class ServerInterface : public CallHook {
   };
 
   template <class Message>
-  class PayloadAsyncRequest GRPC_FINAL : public RegisteredAsyncRequest {
+  class PayloadAsyncRequest final : public RegisteredAsyncRequest {
    public:
     PayloadAsyncRequest(void* registered_method, ServerInterface* server,
                         ServerContext* context,
@@ -202,12 +178,10 @@ class ServerInterface : public CallHook {
       IssueRequest(registered_method, &payload_, notification_cq);
     }
 
-    bool FinalizeResult(void** tag, bool* status) GRPC_OVERRIDE {
+    bool FinalizeResult(void** tag, bool* status) override {
       bool serialization_status =
           *status && payload_ &&
-          SerializationTraits<Message>::Deserialize(
-              payload_, request_, server_->max_receive_message_size())
-              .ok();
+          SerializationTraits<Message>::Deserialize(payload_, request_).ok();
       bool ret = RegisteredAsyncRequest::FinalizeResult(tag, status);
       *status = serialization_status && *status;
       return ret;
@@ -226,7 +200,7 @@ class ServerInterface : public CallHook {
                         ServerCompletionQueue* notification_cq, void* tag,
                         bool delete_on_finalize);
 
-    bool FinalizeResult(void** tag, bool* status) GRPC_OVERRIDE;
+    bool FinalizeResult(void** tag, bool* status) override;
 
    private:
     grpc_call_details call_details_;

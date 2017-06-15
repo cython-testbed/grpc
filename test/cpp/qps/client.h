@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -36,6 +21,7 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #include <grpc++/channel.h>
@@ -45,12 +31,12 @@
 #include <grpc/support/log.h>
 #include <grpc/support/time.h>
 
-#include "src/proto/grpc/testing/payloads.grpc.pb.h"
+#include "src/core/lib/surface/completion_queue.h"
+#include "src/proto/grpc/testing/payloads.pb.h"
 #include "src/proto/grpc/testing/services.grpc.pb.h"
 
 #include "test/cpp/qps/histogram.h"
 #include "test/cpp/qps/interarrival.h"
-#include "test/cpp/qps/limit_cores.h"
 #include "test/cpp/qps/usage_timer.h"
 #include "test/cpp/util/create_test_channel.h"
 
@@ -102,7 +88,7 @@ class ClientRequestCreator<ByteBuffer> {
     if (payload_config.has_bytebuf_params()) {
       std::unique_ptr<char[]> buf(
           new char[payload_config.bytebuf_params().req_size()]);
-      gpr_slice s = gpr_slice_from_copied_buffer(
+      grpc_slice s = grpc_slice_from_copied_buffer(
           buf.get(), payload_config.bytebuf_params().req_size());
       Slice slice(s, Slice::STEAL_REF);
       *req = ByteBuffer(&slice, 1);
@@ -112,64 +98,94 @@ class ClientRequestCreator<ByteBuffer> {
   }
 };
 
-class HistogramEntry GRPC_FINAL {
+class HistogramEntry final {
  public:
-  HistogramEntry() : used_(false) {}
-  bool used() const { return used_; }
+  HistogramEntry() : value_used_(false), status_used_(false) {}
+  bool value_used() const { return value_used_; }
   double value() const { return value_; }
   void set_value(double v) {
-    used_ = true;
+    value_used_ = true;
     value_ = v;
+  }
+  bool status_used() const { return status_used_; }
+  int status() const { return status_; }
+  void set_status(int status) {
+    status_used_ = true;
+    status_ = status;
   }
 
  private:
-  bool used_;
+  bool value_used_;
   double value_;
+  bool status_used_;
+  int status_;
 };
+
+typedef std::unordered_map<int, int64_t> StatusHistogram;
+
+inline void MergeStatusHistogram(const StatusHistogram& from,
+                                 StatusHistogram* to) {
+  for (StatusHistogram::const_iterator it = from.begin(); it != from.end();
+       ++it) {
+    (*to)[it->first] += it->second;
+  }
+}
 
 class Client {
  public:
   Client()
       : timer_(new UsageTimer),
         interarrival_timer_(),
-        started_requests_(false) {
+        started_requests_(false),
+        last_reset_poll_count_(0) {
     gpr_event_init(&start_requests_);
   }
   virtual ~Client() {}
 
   ClientStats Mark(bool reset) {
     Histogram latencies;
+    StatusHistogram statuses;
     UsageTimer::Result timer_result;
 
     MaybeStartRequests();
 
-    // avoid std::vector for old compilers that expect a copy constructor
+    int cur_poll_count = GetPollCount();
+    int poll_count = cur_poll_count - last_reset_poll_count_;
     if (reset) {
-      Histogram* to_merge = new Histogram[threads_.size()];
+      std::vector<Histogram> to_merge(threads_.size());
+      std::vector<StatusHistogram> to_merge_status(threads_.size());
+
       for (size_t i = 0; i < threads_.size(); i++) {
-        threads_[i]->BeginSwap(&to_merge[i]);
+        threads_[i]->BeginSwap(&to_merge[i], &to_merge_status[i]);
       }
       std::unique_ptr<UsageTimer> timer(new UsageTimer);
       timer_.swap(timer);
       for (size_t i = 0; i < threads_.size(); i++) {
-        threads_[i]->EndSwap();
         latencies.Merge(to_merge[i]);
+        MergeStatusHistogram(to_merge_status[i], &statuses);
       }
-      delete[] to_merge;
       timer_result = timer->Mark();
+      last_reset_poll_count_ = cur_poll_count;
     } else {
       // merge snapshots of each thread histogram
       for (size_t i = 0; i < threads_.size(); i++) {
-        threads_[i]->MergeStatsInto(&latencies);
+        threads_[i]->MergeStatsInto(&latencies, &statuses);
       }
       timer_result = timer_->Mark();
     }
 
     ClientStats stats;
     latencies.FillProto(stats.mutable_latencies());
+    for (StatusHistogram::const_iterator it = statuses.begin();
+         it != statuses.end(); ++it) {
+      RequestResultCount* rrc = stats.add_request_results();
+      rrc->set_status_code(it->first);
+      rrc->set_count(it->second);
+    }
     stats.set_time_elapsed(timer_result.wall);
     stats.set_time_system(timer_result.system);
     stats.set_time_user(timer_result.user);
+    stats.set_cq_poll_count(poll_count);
     return stats;
   }
 
@@ -182,6 +198,11 @@ class Client {
     while (threads_remaining_ != 0) {
       threads_complete_.wait(g);
     }
+  }
+
+  virtual int GetPollCount() {
+    // For sync client.
+    return 0;
   }
 
  protected:
@@ -258,16 +279,16 @@ class Client {
 
     ~Thread() { impl_.join(); }
 
-    void BeginSwap(Histogram* n) {
+    void BeginSwap(Histogram* n, StatusHistogram* s) {
       std::lock_guard<std::mutex> g(mu_);
       n->Swap(&histogram_);
+      s->swap(statuses_);
     }
 
-    void EndSwap() {}
-
-    void MergeStatsInto(Histogram* hist) {
+    void MergeStatsInto(Histogram* hist, StatusHistogram* s) {
       std::unique_lock<std::mutex> g(mu_);
       hist->Merge(histogram_);
+      MergeStatusHistogram(statuses_, s);
     }
 
    private:
@@ -288,8 +309,11 @@ class Client {
         const bool thread_still_ok = client_->ThreadFunc(&entry, idx_);
         // lock, update histogram if needed and see if we're done
         std::lock_guard<std::mutex> g(mu_);
-        if (entry.used()) {
+        if (entry.value_used()) {
           histogram_.Add(entry.value());
+        }
+        if (entry.status_used()) {
+          statuses_[entry.status()]++;
         }
         if (!thread_still_ok) {
           gpr_log(GPR_ERROR, "Finishing client thread due to RPC error");
@@ -304,6 +328,7 @@ class Client {
 
     std::mutex mu_;
     Histogram histogram_;
+    StatusHistogram statuses_;
     Client* client_;
     const size_t idx_;
     std::thread impl_;
@@ -321,6 +346,8 @@ class Client {
 
   gpr_event start_requests_;
   bool started_requests_;
+
+  int last_reset_poll_count_;
 
   void MaybeStartRequests() {
     if (!started_requests_) {
@@ -344,7 +371,7 @@ class ClientImpl : public Client {
   ClientImpl(const ClientConfig& config,
              std::function<std::unique_ptr<StubType>(std::shared_ptr<Channel>)>
                  create_stub)
-      : cores_(LimitCores(config.core_list().data(), config.core_list_size())),
+      : cores_(gpr_cpu_num_cores()),
         channels_(config.client_channels()),
         create_stub_(create_stub) {
     for (int i = 0; i < config.client_channels(); i++) {
@@ -379,6 +406,7 @@ class ClientImpl : public Client {
       // old compilers happy with using this in std::vector
       ChannelArguments args;
       args.SetInt("shard_to_ensure_no_subchannel_merges", shard);
+      set_channel_args(config, &args);
       channel_ = CreateTestChannel(
           target, config.security_params().server_host_override(),
           config.has_security_params(), !config.security_params().use_test_ca(),
@@ -393,6 +421,18 @@ class ClientImpl : public Client {
     StubType* get_stub() { return stub_.get(); }
 
    private:
+    void set_channel_args(const ClientConfig& config, ChannelArguments* args) {
+      for (auto channel_arg : config.channel_args()) {
+        if (channel_arg.value_case() == ChannelArg::kStrValue) {
+          args->SetString(channel_arg.name(), channel_arg.str_value());
+        } else if (channel_arg.value_case() == ChannelArg::kIntValue) {
+          args->SetInt(channel_arg.name(), channel_arg.int_value());
+        } else {
+          gpr_log(GPR_ERROR, "Empty channel arg value.");
+        }
+      }
+    }
+
     std::shared_ptr<Channel> channel_;
     std::unique_ptr<StubType> stub_;
   };
@@ -401,11 +441,8 @@ class ClientImpl : public Client {
       create_stub_;
 };
 
-std::unique_ptr<Client> CreateSynchronousUnaryClient(const ClientConfig& args);
-std::unique_ptr<Client> CreateSynchronousStreamingClient(
-    const ClientConfig& args);
-std::unique_ptr<Client> CreateAsyncUnaryClient(const ClientConfig& args);
-std::unique_ptr<Client> CreateAsyncStreamingClient(const ClientConfig& args);
+std::unique_ptr<Client> CreateSynchronousClient(const ClientConfig& args);
+std::unique_ptr<Client> CreateAsyncClient(const ClientConfig& args);
 std::unique_ptr<Client> CreateGenericAsyncStreamingClient(
     const ClientConfig& args);
 

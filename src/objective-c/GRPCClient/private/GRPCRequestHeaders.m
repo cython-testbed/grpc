@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -38,10 +23,9 @@
 #import "NSDictionary+GRPC.h"
 
 // Used by the setter.
-static void CheckIsNonNilASCII(NSString *name, NSString *value) {
+static void CheckIsNonNilASCII(NSString *name, NSString* value) {
   if (!value) {
-    [NSException raise:NSInvalidArgumentException
-                format:@"%@ cannot be nil", name];
+    [NSException raise:NSInvalidArgumentException format:@"%@ cannot be nil", name];
   }
   if (![value canBeConvertedToEncoding:NSASCIIStringEncoding]) {
     [NSException raise:NSInvalidArgumentException
@@ -53,20 +37,15 @@ static void CheckIsNonNilASCII(NSString *name, NSString *value) {
 static void CheckKeyValuePairIsValid(NSString *key, id value) {
   if ([key hasSuffix:@"-bin"]) {
     if (![value isKindOfClass:NSData.class]) {
-      [NSException
-           raise:NSInvalidArgumentException
-          format:@"Expected NSData value for header %@ ending in \"-bin\", "
-                 @"instead got %@",
-                 key, value];
+      [NSException raise:NSInvalidArgumentException
+                  format:@"Expected NSData value for header %@ ending in \"-bin\", "
+       @"instead got %@", key, value];
     }
   } else {
     if (![value isKindOfClass:NSString.class]) {
-      [NSException
-           raise:NSInvalidArgumentException
-          format:
-              @"Expected NSString value for header %@ not ending in \"-bin\", "
-              @"instead got %@",
-              key, value];
+      [NSException raise:NSInvalidArgumentException
+                  format:@"Expected NSString value for header %@ not ending in \"-bin\", "
+       @"instead got %@", key, value];
     }
     CheckIsNonNilASCII(@"Text header value", (NSString *)value);
   }
@@ -74,10 +53,9 @@ static void CheckKeyValuePairIsValid(NSString *key, id value) {
 
 @implementation GRPCRequestHeaders {
   __weak GRPCCall *_call;
-  // The NSMutableDictionary superclass doesn't hold any storage (so that people
-  // can implement their own in subclasses). As that's not the reason we're
-  // subclassing, we just delegate storage to the default NSMutableDictionary
-  // subclass returned by the cluster (e.g. __NSDictionaryM on iOS 9).
+  // The NSMutableDictionary superclass doesn't hold any storage (so that people can implement their
+  // own in subclasses). As that's not the reason we're subclassing, we just delegate storage to the
+  // default NSMutableDictionary subclass returned by the cluster (e.g. __NSDictionaryM on iOS 9).
   NSMutableDictionary *_delegate;
 }
 
@@ -98,8 +76,7 @@ static void CheckKeyValuePairIsValid(NSString *key, id value) {
 }
 
 // Designated initializer
-- (instancetype)initWithCall:(GRPCCall *)call
-                     storage:(NSMutableDictionary *)storage {
+- (instancetype)initWithCall:(GRPCCall *)call storage:(NSMutableDictionary *)storage {
   // TODO(jcanizales): Throw if call or storage are nil.
   if ((self = [super init])) {
     _call = call;
@@ -108,10 +85,9 @@ static void CheckKeyValuePairIsValid(NSString *key, id value) {
   return self;
 }
 
-- (instancetype)
-initWithObjects:(const id _Nonnull __unsafe_unretained *)objects
-        forKeys:(const id<NSCopying> _Nonnull __unsafe_unretained *)keys
-          count:(NSUInteger)cnt {
+- (instancetype)initWithObjects:(const id  _Nonnull __unsafe_unretained *)objects
+                        forKeys:(const id<NSCopying>  _Nonnull __unsafe_unretained *)keys
+                          count:(NSUInteger)cnt {
   return [self init];
 }
 
@@ -143,7 +119,7 @@ initWithObjects:(const id _Nonnull __unsafe_unretained *)objects
   return _delegate.count;
 }
 
-- (NSEnumerator *_Nonnull)keyEnumerator {
+- (NSEnumerator * _Nonnull)keyEnumerator {
   return [_delegate keyEnumerator];
 }
 

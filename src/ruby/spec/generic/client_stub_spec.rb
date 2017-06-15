@@ -1,31 +1,16 @@
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 require 'grpc'
 
@@ -168,23 +153,60 @@ describe 'ClientStub' do
         expect(&blk).to raise_error(GRPC::BadStatus)
         th.join
       end
+
+      it 'should receive UNAUTHENTICATED if call credentials plugin fails' do
+        server_port = create_secure_test_server
+        th = run_request_response(@sent_msg, @resp, @pass)
+
+        certs = load_test_certs
+        secure_channel_creds = GRPC::Core::ChannelCredentials.new(
+          certs[0], nil, nil)
+        secure_stub_opts = {
+          channel_args: {
+            GRPC::Core::Channel::SSL_TARGET => 'foo.test.google.fr'
+          }
+        }
+        stub = GRPC::ClientStub.new("localhost:#{server_port}",
+                                    secure_channel_creds, **secure_stub_opts)
+
+        error_message = 'Failing call credentials callback'
+        failing_auth = proc do
+          fail error_message
+        end
+        creds = GRPC::Core::CallCredentials.new(failing_auth)
+
+        unauth_error_occured = false
+        begin
+          get_response(stub, credentials: creds)
+        rescue GRPC::Unauthenticated => e
+          unauth_error_occured = true
+          expect(e.details.include?(error_message)).to be true
+        end
+        expect(unauth_error_occured).to eq(true)
+
+        # Kill the server thread so tests can complete
+        th.kill
+      end
     end
 
     describe 'without a call operation' do
-      def get_response(stub)
+      def get_response(stub, credentials: nil)
+        puts credentials.inspect
         stub.request_response(@method, @sent_msg, noop, noop,
-                              metadata: { k1: 'v1', k2: 'v2' })
+                              metadata: { k1: 'v1', k2: 'v2' },
+                              credentials: credentials)
       end
 
       it_behaves_like 'request response'
     end
 
     describe 'via a call operation' do
-      def get_response(stub, run_start_call_first: false)
+      def get_response(stub, run_start_call_first: false, credentials: nil)
         op = stub.request_response(@method, @sent_msg, noop, noop,
                                    return_op: true,
                                    metadata: { k1: 'v1', k2: 'v2' },
-                                   deadline: from_relative_time(2))
+                                   deadline: from_relative_time(2),
+                                   credentials: credentials)
         expect(op).to be_a(GRPC::ActiveCall::Operation)
         op.start_call if run_start_call_first
         result = op.execute
@@ -490,6 +512,15 @@ describe 'ClientStub' do
       c.remote_send(resp)
       c.send_status(status, status == @pass ? 'OK' : 'NOK', true)
     end
+  end
+
+  def create_secure_test_server
+    certs = load_test_certs
+    secure_credentials = GRPC::Core::ServerCredentials.new(
+      nil, [{ private_key: certs[1], cert_chain: certs[2] }], false)
+
+    @server = GRPC::Core::Server.new(nil)
+    @server.add_http2_port('0.0.0.0:0', secure_credentials)
   end
 
   def create_test_server

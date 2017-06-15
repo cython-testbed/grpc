@@ -160,8 +160,6 @@
     <ClInclude Include="$(SolutionDir)\..\include\grpc\support\log.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\support\log_windows.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\support\port_platform.h" />
-    <ClInclude Include="$(SolutionDir)\..\include\grpc\support\slice.h" />
-    <ClInclude Include="$(SolutionDir)\..\include\grpc\support\slice_buffer.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\support\string_util.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\support\subprocess.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\support\sync.h" />
@@ -179,9 +177,9 @@
     <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\atm_gcc_atomic.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\atm_gcc_sync.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\atm_windows.h" />
+    <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\gpr_slice.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\gpr_types.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\port_platform.h" />
-    <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\slice.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\sync.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\sync_generic.h" />
     <ClInclude Include="$(SolutionDir)\..\include\grpc\impl\codegen\sync_posix.h" />
@@ -189,12 +187,17 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(SolutionDir)\..\src\core\lib\profiling\timers.h" />
+    <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\arena.h" />
+    <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\atomic.h" />
+    <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\atomic_with_atm.h" />
+    <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\atomic_with_std.h" />
     <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\backoff.h" />
     <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\block_annotate.h" />
     <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\env.h" />
+    <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\memory.h" />
     <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\mpscq.h" />
     <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\murmur_hash.h" />
-    <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\percent_encoding.h" />
+    <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\spinlock.h" />
     <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\stack_lockfree.h" />
     <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\string.h" />
     <ClInclude Include="$(SolutionDir)\..\src\core\lib\support\string_windows.h" />
@@ -208,6 +211,10 @@
     <ClCompile Include="$(SolutionDir)\..\src\core\lib\profiling\stap_timers.c">
     </ClCompile>
     <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\alloc.c">
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\arena.c">
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\atm.c">
     </ClCompile>
     <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\avl.c">
     </ClCompile>
@@ -246,12 +253,6 @@
     <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\mpscq.c">
     </ClCompile>
     <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\murmur_hash.c">
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\percent_encoding.c">
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\slice.c">
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\slice_buffer.c">
     </ClCompile>
     <ClCompile Include="$(SolutionDir)\..\src\core\lib\support\stack_lockfree.c">
     </ClCompile>
